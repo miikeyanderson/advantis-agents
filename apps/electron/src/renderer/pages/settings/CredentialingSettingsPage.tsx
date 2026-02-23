@@ -1,29 +1,35 @@
 import * as React from 'react'
 import { useAtom } from 'jotai'
-import { PanelHeader } from '@/components/app-shell/PanelHeader'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Dashboard } from '@/components/dashboard/Dashboard'
+
 import {
   credentialingCasesAtom,
   credentialingDashboardLoadingAtom,
   credentialingDashboardStateFilterAtom,
+  credentialingGuardResultAtom,
   credentialingSelectedCaseIdAtom,
   credentialingTemplatesAtom,
+  credentialingTimelineAtom,
 } from '@/atoms/credentialing'
-import { navigate, routes } from '@/lib/navigate'
-import type {
-  CredentialingCaseListItem,
-  CredentialingCaseState,
-  CredentialingFacilityTemplate,
-  IpcResponse,
-} from '../../../shared/types'
-import type { DetailsPageMeta } from '@/lib/navigation-registry'
+import { PanelHeader } from '@/components/app-shell/PanelHeader'
+import { CaseTimeline } from '@/components/case-timeline/CaseTimeline'
+import { Dashboard } from '@/components/dashboard/Dashboard'
 import {
   mapCredentialingCaseToDashboardRow,
   type DashboardCaseRowData,
   type DashboardFacilityOption,
   type NewCaseFormInput,
 } from '@/components/dashboard/types'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { navigate, routes } from '@/lib/navigate'
+import type { DetailsPageMeta } from '@/lib/navigation-registry'
+import type {
+  CredentialingCaseListItem,
+  CredentialingCaseState,
+  CredentialingFacilityTemplate,
+  CredentialingGuardResult,
+  CredentialingTimeline,
+  IpcResponse,
+} from '../../../shared/types'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -47,10 +53,23 @@ function unwrap<T>(response: IpcResponse<T>, fallback: string): T {
   return response.data
 }
 
+function getNextState(state: CredentialingCaseState): CredentialingCaseState | null {
+  return NEXT_STATE[state] ?? null
+}
+
+function pickNextVerificationType(timeline: CredentialingTimeline): string | null {
+  const caseRecord = timeline.case
+  if (!caseRecord) return null
+  const completed = new Set(timeline.verifications.map((v) => v.verificationType))
+  const missing = caseRecord.requiredVerificationTypesSnapshot.find((type) => !completed.has(type))
+  if (missing) return missing
+  return caseRecord.requiredVerificationTypesSnapshot[0] ?? null
+}
+
 async function enrichDashboardRows(cases: CredentialingCaseListItem[]): Promise<DashboardCaseRowData[]> {
   const rows = await Promise.all(
     cases.map(async (item) => {
-      const nextState = NEXT_STATE[item.state]
+      const nextState = getNextState(item.state)
       let blockerCount = 0
       let assignedAgentRole: string | null = null
 
@@ -76,11 +95,16 @@ async function enrichDashboardRows(cases: CredentialingCaseListItem[]): Promise<
 export default function CredentialingSettingsPage() {
   const [selectedState, setSelectedState] = useAtom(credentialingDashboardStateFilterAtom)
   const [selectedCaseId, setSelectedCaseId] = useAtom(credentialingSelectedCaseIdAtom)
-  const [rawCases, setRawCases] = useAtom(credentialingCasesAtom)
+  const [, setRawCases] = useAtom(credentialingCasesAtom)
   const [templates, setTemplates] = useAtom(credentialingTemplatesAtom)
+  const [timeline, setTimeline] = useAtom(credentialingTimelineAtom)
+  const [guardResult, setGuardResult] = useAtom(credentialingGuardResultAtom)
   const [isLoading, setIsLoading] = useAtom(credentialingDashboardLoadingAtom)
+
   const [rows, setRows] = React.useState<DashboardCaseRowData[]>([])
   const [error, setError] = React.useState<string | null>(null)
+  const [isTimelineBusy, setIsTimelineBusy] = React.useState(false)
+  const [selectedFindingId, setSelectedFindingId] = React.useState<string | null>(null)
 
   const facilities = React.useMemo<DashboardFacilityOption[]>(() => {
     return templates.map((template) => ({
@@ -89,6 +113,11 @@ export default function CredentialingSettingsPage() {
       jurisdiction: template.jurisdiction,
     }))
   }, [templates])
+
+  const selectedRow = React.useMemo(
+    () => (selectedCaseId ? rows.find((row) => row.id === selectedCaseId) ?? null : null),
+    [rows, selectedCaseId],
+  )
 
   const loadTemplates = React.useCallback(async () => {
     const response = await window.electronAPI.credentialingQueryTemplates({})
@@ -114,6 +143,40 @@ export default function CredentialingSettingsPage() {
     }
   }, [selectedState, setIsLoading, setRawCases])
 
+  const loadTimelineAndGuards = React.useCallback(async (caseId: string) => {
+    const timelineResponse = await window.electronAPI.credentialingGetCaseTimeline(caseId)
+    const timelineData = unwrap<CredentialingTimeline>(timelineResponse, 'Failed to load case timeline')
+    setTimeline(timelineData)
+
+    const caseRecord = timelineData.case
+    if (!caseRecord) {
+      setGuardResult(null)
+      return timelineData
+    }
+
+    const nextState = getNextState(caseRecord.state)
+    if (!nextState) {
+      setGuardResult(null)
+      return timelineData
+    }
+
+    const guardResponse = await window.electronAPI.credentialingCheckGuards(caseId, nextState)
+    const guardData = unwrap<CredentialingGuardResult>(guardResponse, 'Failed to check guards')
+    setGuardResult(guardData)
+    return timelineData
+  }, [setGuardResult, setTimeline])
+
+  const refreshSelectedCase = React.useCallback(async () => {
+    if (!selectedCaseId) return
+    setIsTimelineBusy(true)
+    try {
+      await loadTimelineAndGuards(selectedCaseId)
+      await loadCases()
+    } finally {
+      setIsTimelineBusy(false)
+    }
+  }, [loadCases, loadTimelineAndGuards, selectedCaseId])
+
   React.useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -127,11 +190,28 @@ export default function CredentialingSettingsPage() {
         }
       }
     }
-    run()
+    void run()
     return () => {
       cancelled = true
     }
   }, [loadCases, loadTemplates])
+
+  React.useEffect(() => {
+    if (!selectedCaseId) {
+      setTimeline(null)
+      setGuardResult(null)
+      setSelectedFindingId(null)
+      return
+    }
+    setIsTimelineBusy(true)
+    void loadTimelineAndGuards(selectedCaseId)
+      .catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : String(loadError))
+      })
+      .finally(() => {
+        setIsTimelineBusy(false)
+      })
+  }, [loadTimelineAndGuards, selectedCaseId, setGuardResult, setTimeline])
 
   const handleCreateCase = React.useCallback(async (input: NewCaseFormInput) => {
     const response = await window.electronAPI.credentialingCreateCase(input)
@@ -142,7 +222,38 @@ export default function CredentialingSettingsPage() {
     return created
   }, [loadCases, setSelectedCaseId])
 
-  const filteredRows = rows
+  const handleRunVerification = React.useCallback(async () => {
+    if (!selectedCaseId || !timeline) return
+    const nextVerificationType = pickNextVerificationType(timeline)
+    if (!nextVerificationType) return
+    setIsTimelineBusy(true)
+    try {
+      const response = await window.electronAPI.credentialingRunVerification(selectedCaseId, nextVerificationType)
+      unwrap(response, 'Failed to run verification')
+      await loadTimelineAndGuards(selectedCaseId)
+      await loadCases()
+    } finally {
+      setIsTimelineBusy(false)
+    }
+  }, [loadCases, loadTimelineAndGuards, selectedCaseId, timeline])
+
+  const handleAdvanceState = React.useCallback(async () => {
+    if (!selectedCaseId || !timeline?.case) return
+    const nextState = getNextState(timeline.case.state)
+    if (!nextState) return
+    setIsTimelineBusy(true)
+    try {
+      const response = await window.electronAPI.credentialingTransitionState(selectedCaseId, nextState)
+      unwrap(response, 'Failed to transition state')
+      await loadTimelineAndGuards(selectedCaseId)
+      await loadCases()
+    } finally {
+      setIsTimelineBusy(false)
+    }
+  }, [loadCases, loadTimelineAndGuards, selectedCaseId, timeline])
+
+  const selectedCaseRecord = timeline?.case ?? null
+  const nextState = selectedCaseRecord ? getNextState(selectedCaseRecord.state) : null
 
   return (
     <div className="h-full flex flex-col min-w-0 overflow-hidden">
@@ -156,7 +267,7 @@ export default function CredentialingSettingsPage() {
           ) : null}
 
           <Dashboard
-            cases={filteredRows}
+            cases={rows}
             facilities={facilities}
             selectedState={selectedState}
             isLoading={isLoading}
@@ -164,20 +275,42 @@ export default function CredentialingSettingsPage() {
             onCreateCase={handleCreateCase}
             onSelectCase={(caseId) => {
               setSelectedCaseId(caseId)
+              setSelectedFindingId(null)
               navigate(routes.view.settings('credentialing'))
             }}
             onSelectState={setSelectedState}
           />
 
-          {selectedCaseId ? (
-            <div className="rounded-[8px] border border-border/40 bg-background shadow-minimal px-4 py-3">
-              <div className="text-sm font-medium">Selected Case</div>
-              <div className="mt-1 text-xs text-muted-foreground break-all">
-                {selectedCaseId}
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground">
-                Case timeline view is implemented in Task 10 inside this credentialing page.
-              </div>
+          {selectedCaseRecord ? (
+            <CaseTimeline
+              caseRecord={selectedCaseRecord}
+              events={timeline?.events ?? []}
+              documents={timeline?.documents ?? []}
+              verifications={timeline?.verifications ?? []}
+              approvals={timeline?.approvals ?? []}
+              nextState={nextState}
+              guardResult={guardResult}
+              isBusy={isTimelineBusy}
+              onRefresh={refreshSelectedCase}
+              onRunVerification={handleRunVerification}
+              onAdvanceState={handleAdvanceState}
+              onReviewFinding={(verificationId) => {
+                setSelectedFindingId(verificationId)
+              }}
+              onBack={() => {
+                setSelectedCaseId(null)
+                setSelectedFindingId(null)
+              }}
+            />
+          ) : selectedCaseId ? (
+            <div className="rounded-[8px] border border-border/40 bg-background shadow-minimal px-4 py-3 text-sm text-muted-foreground">
+              Loading case timeline for {selectedRow?.clinicianName ?? selectedCaseId}…
+            </div>
+          ) : null}
+
+          {selectedFindingId ? (
+            <div className="rounded-[8px] border border-border/40 bg-background shadow-minimal px-4 py-3 text-sm text-muted-foreground">
+              Selected finding: {selectedFindingId}. Approval modal is wired in Task 11.
             </div>
           ) : null}
         </div>
