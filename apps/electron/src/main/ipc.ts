@@ -6,6 +6,7 @@ import { homedir, tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import { SessionManager } from './sessions'
+import type { CaseManager } from './case-manager'
 import { ipcLog, windowLog, searchLog } from './logger'
 import { WindowManager } from './window-manager'
 import { registerOnboardingHandlers } from './onboarding'
@@ -453,7 +454,20 @@ async function validateFilePath(filePath: string): Promise<string> {
   return realPath
 }
 
-export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager): void {
+export function registerIpcHandlers(
+  sessionManager: SessionManager,
+  windowManager: WindowManager,
+  caseManager?: CaseManager,
+): void {
+  const ok = <T>(data: T) => ({ success: true as const, data })
+  const fail = (code: string, error: unknown) => ({
+    success: false as const,
+    error: {
+      code,
+      message: error instanceof Error ? error.message : String(error),
+    },
+  })
+
   // Get all sessions for the calling window's workspace
   // Waits for initialization to complete so sessions are never returned empty during startup
   ipcMain.handle(IPC_CHANNELS.GET_SESSIONS, async (event) => {
@@ -597,6 +611,56 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     const session = sessionManager.createSession(workspaceId, options)
     end()
     return session
+  })
+
+  // ============================================================
+  // Credentialing: Case-scoped agent sessions (Task 8)
+  // ============================================================
+
+  ipcMain.handle('credentialing:spawn-agent', async (event, caseId: string, agentRole: string) => {
+    try {
+      if (!caseManager) {
+        throw new Error('CaseManager not initialized')
+      }
+      const workspaceId = windowManager.getWorkspaceForWindow(event.sender.id)
+      if (!workspaceId) {
+        throw new Error('No workspace is associated with the calling window')
+      }
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) {
+        throw new Error(`Workspace not found: ${workspaceId}`)
+      }
+      caseManager.setDefaultWorkspaceContext(workspace.id, workspace.rootPath)
+      const agentSession = await caseManager.spawnAgentForCase(caseId, agentRole as import('../../../../packages/credentialing/src/agents/index.ts').AgentRole)
+      return ok(agentSession)
+    } catch (error) {
+      ipcLog.error('credentialing:spawn-agent failed:', error)
+      return fail('CREDENTIALING_SPAWN_AGENT_FAILED', error)
+    }
+  })
+
+  ipcMain.handle('credentialing:get-active-agent', async (_event, caseId: string) => {
+    try {
+      if (!caseManager) {
+        throw new Error('CaseManager not initialized')
+      }
+      return ok(caseManager.getActiveCaseAgent(caseId))
+    } catch (error) {
+      ipcLog.error('credentialing:get-active-agent failed:', error)
+      return fail('CREDENTIALING_GET_ACTIVE_AGENT_FAILED', error)
+    }
+  })
+
+  ipcMain.handle('credentialing:list-case-agents', async (_event, caseId: string) => {
+    try {
+      if (!caseManager) {
+        throw new Error('CaseManager not initialized')
+      }
+      return ok(caseManager.listCaseAgents(caseId))
+    } catch (error) {
+      ipcLog.error('credentialing:list-case-agents failed:', error)
+      return fail('CREDENTIALING_LIST_CASE_AGENTS_FAILED', error)
+    }
   })
 
   // Create a sub-session under a parent session

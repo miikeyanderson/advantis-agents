@@ -66,6 +66,7 @@ Sentry.setUser({ id: machineId })
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { SessionManager } from './sessions'
+import { CaseManager } from './case-manager'
 import { registerIpcHandlers, startCodexModelRefresh, stopCodexModelRefresh } from './ipc'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
@@ -86,6 +87,7 @@ import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
 import { initNotificationService, clearBadgeCount, initBadgeIcon, initInstanceBadge } from './notifications'
 import { checkForUpdatesOnLaunch, setWindowManager as setAutoUpdateWindowManager, isUpdating } from './auto-update'
 import { validateGitBashPath } from './git-bash'
+import { Database as CredentialingDatabase } from '../../../../packages/credentialing/src/index.ts'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -103,6 +105,8 @@ const DEEPLINK_SCHEME = process.env.CRAFT_DEEPLINK_SCHEME || 'craftagents'
 
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
+let caseManager: CaseManager | null = null
+let credentialingDb: CredentialingDatabase | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -292,6 +296,8 @@ app.whenReady().then(async () => {
     // Initialize session manager
     sessionManager = new SessionManager()
     sessionManager.setWindowManager(windowManager)
+    credentialingDb = new CredentialingDatabase(join(app.getPath('userData'), 'credentialing.sqlite'))
+    caseManager = new CaseManager(sessionManager, credentialingDb)
 
     // Initialize notification service
     initNotificationService(windowManager)
@@ -313,7 +319,7 @@ app.whenReady().then(async () => {
     }
 
     // Register IPC handlers (must happen before window creation)
-    registerIpcHandlers(sessionManager, windowManager)
+    registerIpcHandlers(sessionManager, windowManager, caseManager)
 
     // Create initial windows (restores from saved state or opens first workspace)
     await createInitialWindows()
@@ -453,6 +459,8 @@ app.on('before-quit', async (event) => {
 
     // Stop periodic Codex model refresh
     stopCodexModelRefresh()
+    credentialingDb?.close()
+    credentialingDb = null
 
     // Clean up power manager (release power blocker)
     const { cleanup: cleanupPowerManager } = await import('./power-manager')

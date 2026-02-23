@@ -38,6 +38,7 @@ export type CredentialingMcpServerOptions = {
   getSessionPrincipal: () => CredentialingSessionPrincipal | null
   callLlm?: (prompt: string, input: unknown) => Promise<unknown>
   verificationAdapters?: Record<string, VerificationAdapter>
+  allowedTools?: string[]
 }
 
 function stripActorIdentity(input: unknown): unknown {
@@ -88,7 +89,11 @@ export class CredentialingMcpServer {
       ...createTemplateTools(),
       ...createPacketTools(),
     ]
+    const allowedSet = options.allowedTools ? new Set(options.allowedTools) : null
     for (const def of handlerDefs) {
+      if (allowedSet && !allowedSet.has(def.name)) {
+        continue
+      }
       this.handlers.set(def.name, def)
     }
 
@@ -126,6 +131,14 @@ export class CredentialingMcpServer {
 
   setVerificationAdapter(verificationType: string, adapter: VerificationAdapter): void {
     this.verificationAdapters.set(verificationType, adapter)
+  }
+
+  getToolDefinitions(): Array<Pick<ToolHandlerDef, 'name' | 'description' | 'schema'>> {
+    return Array.from(this.handlers.values()).map((def) => ({
+      name: def.name,
+      description: def.description,
+      schema: def.schema,
+    }))
   }
 
   private getVerificationAdapter(verificationType: string): VerificationAdapter {
