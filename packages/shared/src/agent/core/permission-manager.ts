@@ -131,6 +131,30 @@ export class PermissionManager {
   ): ToolPermissionResult {
     const mode = this.getPermissionMode();
 
+    // Credentialing hard gates: always require explicit human confirmation,
+    // regardless of the current permission mode.
+    if (
+      toolName === 'transitionState' &&
+      toolInput.targetState === 'submitted'
+    ) {
+      return {
+        allowed: true,
+        requiresPermission: true,
+        description: 'Submitting a credentialing packet always requires human confirmation',
+      };
+    }
+
+    if (
+      toolName === 'recordApproval' &&
+      toolInput.decision === 'waiver'
+    ) {
+      return {
+        allowed: true,
+        requiresPermission: true,
+        description: 'Waiver approvals always require human confirmation',
+      };
+    }
+
     // Use shouldAllowToolInMode which handles all the complex logic
     const result = shouldAllowToolInMode(toolName, toolInput, mode, {
       plansFolderPath: this.config.plansFolderPath,

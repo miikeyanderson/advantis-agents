@@ -196,4 +196,30 @@ describe('PermissionManager', () => {
       expect(permissionManager.getSessionId()).toBe(TEST_SESSION_ID);
     });
   });
+
+  describe('Credentialing hard confirmation gates', () => {
+    it('always requires confirmation for transitionState -> submitted in all modes', () => {
+      for (const mode of ['safe', 'ask', 'allow-all'] as const) {
+        permissionManager.setPermissionMode(mode);
+        const result = permissionManager.evaluateToolCall('transitionState', {
+          caseId: 'case-1',
+          targetState: 'submitted',
+        });
+        expect(result.allowed).toBe(true);
+        expect('requiresPermission' in result && result.requiresPermission).toBe(true);
+      }
+    });
+
+    it('always requires confirmation for recordApproval waiver in all modes', () => {
+      for (const mode of ['safe', 'ask', 'allow-all'] as const) {
+        permissionManager.setPermissionMode(mode);
+        const result = permissionManager.evaluateToolCall('recordApproval', {
+          caseId: 'case-1',
+          decision: 'waiver',
+        });
+        expect(result.allowed).toBe(true);
+        expect('requiresPermission' in result && result.requiresPermission).toBe(true);
+      }
+    });
+  });
 });
