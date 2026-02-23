@@ -106,6 +106,7 @@ export class Database {
       this.connection.pragma('foreign_keys = ON')
       this.connection.pragma('journal_mode = WAL')
       this.connection.exec(readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'))
+      this.seedInitialTemplates()
     } catch (error) {
       throw new CredentialingDatabaseError('Failed to initialize credentialing database', error)
     }
@@ -131,6 +132,34 @@ export class Database {
       }
       throw primaryError
     }
+  }
+
+  private seedInitialTemplates(): void {
+    type CountRow = { count: number }
+    const countRow = this.connection.prepare<CountRow>(
+      'SELECT COUNT(*) as count FROM facility_templates',
+    ).get()
+    const count = typeof countRow?.count === 'number' ? countRow.count : 0
+    if (count > 0) {
+      return
+    }
+
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+    this.connection.prepare(
+      `INSERT INTO facility_templates (
+        id, name, jurisdiction, version, requiredDocTypes, requiredVerificationTypes, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      'General Hospital TX',
+      'TX',
+      1,
+      JSON.stringify(['rn_license', 'bls_cert', 'tb_test', 'physical', 'background_check']),
+      JSON.stringify(['nursys', 'oig_sam']),
+      now,
+      now,
+    )
   }
 
   close(): void {

@@ -11,8 +11,10 @@ import {
   credentialingTimelineAtom,
 } from '@/atoms/credentialing'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
+import { ApprovalModal } from '@/components/approval-modal/ApprovalModal'
 import { CaseTimeline } from '@/components/case-timeline/CaseTimeline'
 import { Dashboard } from '@/components/dashboard/Dashboard'
+import { TemplateEditor } from '@/components/template-editor/TemplateEditor'
 import {
   mapCredentialingCaseToDashboardRow,
   type DashboardCaseRowData,
@@ -23,6 +25,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { navigate, routes } from '@/lib/navigate'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import type {
+  CredentialingFindingDetail,
   CredentialingCaseListItem,
   CredentialingCaseState,
   CredentialingFacilityTemplate,
@@ -104,7 +107,10 @@ export default function CredentialingSettingsPage() {
   const [rows, setRows] = React.useState<DashboardCaseRowData[]>([])
   const [error, setError] = React.useState<string | null>(null)
   const [isTimelineBusy, setIsTimelineBusy] = React.useState(false)
+  const [isTemplatesLoading, setIsTemplatesLoading] = React.useState(false)
   const [selectedFindingId, setSelectedFindingId] = React.useState<string | null>(null)
+  const [selectedFindingDetail, setSelectedFindingDetail] = React.useState<CredentialingFindingDetail | null>(null)
+  const [isApprovalSubmitting, setIsApprovalSubmitting] = React.useState(false)
 
   const facilities = React.useMemo<DashboardFacilityOption[]>(() => {
     return templates.map((template) => ({
@@ -120,9 +126,14 @@ export default function CredentialingSettingsPage() {
   )
 
   const loadTemplates = React.useCallback(async () => {
-    const response = await window.electronAPI.credentialingQueryTemplates({})
-    const data = unwrap<CredentialingFacilityTemplate[]>(response, 'Failed to load templates')
-    setTemplates(data)
+    setIsTemplatesLoading(true)
+    try {
+      const response = await window.electronAPI.credentialingQueryTemplates({})
+      const data = unwrap<CredentialingFacilityTemplate[]>(response, 'Failed to load templates')
+      setTemplates(data)
+    } finally {
+      setIsTemplatesLoading(false)
+    }
   }, [setTemplates])
 
   const loadCases = React.useCallback(async () => {
@@ -201,6 +212,7 @@ export default function CredentialingSettingsPage() {
       setTimeline(null)
       setGuardResult(null)
       setSelectedFindingId(null)
+      setSelectedFindingDetail(null)
       return
     }
     setIsTimelineBusy(true)
@@ -212,6 +224,21 @@ export default function CredentialingSettingsPage() {
         setIsTimelineBusy(false)
       })
   }, [loadTimelineAndGuards, selectedCaseId, setGuardResult, setTimeline])
+
+  React.useEffect(() => {
+    if (!selectedFindingId) {
+      setSelectedFindingDetail(null)
+      return
+    }
+    void window.electronAPI.credentialingGetFindingDetail(selectedFindingId)
+      .then((response) => {
+        const detail = unwrap<CredentialingFindingDetail>(response, 'Failed to load finding detail')
+        setSelectedFindingDetail(detail)
+      })
+      .catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : String(loadError))
+      })
+  }, [selectedFindingId])
 
   const handleCreateCase = React.useCallback(async (input: NewCaseFormInput) => {
     const response = await window.electronAPI.credentialingCreateCase(input)
@@ -254,6 +281,27 @@ export default function CredentialingSettingsPage() {
 
   const selectedCaseRecord = timeline?.case ?? null
   const nextState = selectedCaseRecord ? getNextState(selectedCaseRecord.state) : null
+
+  const handleCreateTemplate = React.useCallback(async (input: {
+    name: string
+    jurisdiction: string
+    requiredDocTypes: string[]
+    requiredVerificationTypes: string[]
+  }) => {
+    const response = await window.electronAPI.credentialingCreateTemplate(input)
+    return unwrap(response, 'Failed to create template')
+  }, [])
+
+  const handleUpdateTemplate = React.useCallback(async (input: {
+    facilityId: string
+    name?: string
+    jurisdiction?: string
+    requiredDocTypes?: string[]
+    requiredVerificationTypes?: string[]
+  }) => {
+    const response = await window.electronAPI.credentialingUpdateTemplate(input)
+    return unwrap(response, 'Failed to update template')
+  }, [])
 
   return (
     <div className="h-full flex flex-col min-w-0 overflow-hidden">
@@ -309,10 +357,44 @@ export default function CredentialingSettingsPage() {
           ) : null}
 
           {selectedFindingId ? (
-            <div className="rounded-[8px] border border-border/40 bg-background shadow-minimal px-4 py-3 text-sm text-muted-foreground">
-              Selected finding: {selectedFindingId}. Approval modal is wired in Task 11.
-            </div>
+            <ApprovalModal
+              open={!!selectedFindingId}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setSelectedFindingId(null)
+                  setSelectedFindingDetail(null)
+                }
+              }}
+              finding={selectedFindingDetail}
+              isSubmitting={isApprovalSubmitting}
+              onDecision={async (decision, notes) => {
+                if (!selectedCaseId || !selectedFindingId) return
+                setIsApprovalSubmitting(true)
+                try {
+                  const response = await window.electronAPI.credentialingRecordApproval({
+                    caseId: selectedCaseId,
+                    verificationId: selectedFindingId,
+                    decision,
+                    notes,
+                  })
+                  unwrap(response, 'Failed to record approval')
+                  await refreshSelectedCase()
+                  setSelectedFindingId(null)
+                  setSelectedFindingDetail(null)
+                } finally {
+                  setIsApprovalSubmitting(false)
+                }
+              }}
+            />
           ) : null}
+
+          <TemplateEditor
+            templates={templates}
+            isLoading={isTemplatesLoading}
+            onRefresh={loadTemplates}
+            onCreateTemplate={handleCreateTemplate}
+            onUpdateTemplate={handleUpdateTemplate}
+          />
         </div>
       </ScrollArea>
     </div>
