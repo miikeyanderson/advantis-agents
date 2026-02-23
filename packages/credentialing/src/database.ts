@@ -1,11 +1,31 @@
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
-import { Database as BunSqliteDatabase, type SQLQueryBindings } from 'bun:sqlite'
+
+type SqliteBinding = string | number | bigint | Uint8Array | null
+
+interface BunSqliteQuery {
+  all(...params: SqliteBinding[]): unknown[]
+  get(...params: SqliteBinding[]): unknown
+  run(...params: SqliteBinding[]): unknown
+}
+
+interface BunSqliteDatabaseLike {
+  exec(sql: string): void
+  query(sql: string): BunSqliteQuery
+  transaction<TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => TResult,
+  ): (...args: TArgs) => TResult
+  close(): void
+}
+
+type BunSqliteDatabaseConstructor = new (path: string) => BunSqliteDatabaseLike
 
 export interface SqliteStatement<Row = unknown> {
-  all(...params: SQLQueryBindings[]): Row[]
-  get(...params: SQLQueryBindings[]): Row | undefined
-  run(...params: SQLQueryBindings[]): unknown
+  all(...params: SqliteBinding[]): Row[]
+  get(...params: SqliteBinding[]): Row | undefined
+  run(...params: SqliteBinding[]): unknown
 }
 
 export interface SqliteConnection {
@@ -45,23 +65,23 @@ class BetterSqlite3ConnectionAdapter implements SqliteConnection {
 }
 
 class BunSqliteStatementAdapter<Row = unknown> implements SqliteStatement<Row> {
-  constructor(private readonly statement: ReturnType<BunSqliteDatabase['query']>) {}
+  constructor(private readonly statement: BunSqliteQuery) {}
 
-  all(...params: SQLQueryBindings[]): Row[] {
+  all(...params: SqliteBinding[]): Row[] {
     return this.statement.all(...params) as Row[]
   }
 
-  get(...params: SQLQueryBindings[]): Row | undefined {
+  get(...params: SqliteBinding[]): Row | undefined {
     return this.statement.get(...params) as Row | undefined
   }
 
-  run(...params: SQLQueryBindings[]): unknown {
+  run(...params: SqliteBinding[]): unknown {
     return this.statement.run(...params)
   }
 }
 
 class BunSqliteConnectionAdapter implements SqliteConnection {
-  constructor(private readonly db: BunSqliteDatabase) {}
+  constructor(private readonly db: BunSqliteDatabaseLike) {}
 
   exec(sql: string): void {
     this.db.exec(sql)
@@ -125,6 +145,7 @@ export class Database {
     }
 
     try {
+      const BunSqliteDatabase = loadBunSqliteDatabase()
       return new BunSqliteConnectionAdapter(new BunSqliteDatabase(dbPath))
     } catch {
       if (primaryError instanceof Error) {
@@ -169,4 +190,15 @@ export class Database {
       throw new CredentialingDatabaseError('Failed to close credentialing database', error)
     }
   }
+}
+
+function loadBunSqliteDatabase(): BunSqliteDatabaseConstructor {
+  const require = createRequire(join(process.cwd(), 'package.json'))
+  const bunSqliteModule = require('bun:sqlite') as {
+    Database?: BunSqliteDatabaseConstructor
+  }
+  if (!bunSqliteModule.Database) {
+    throw new Error('bun:sqlite Database export not available')
+  }
+  return bunSqliteModule.Database
 }
