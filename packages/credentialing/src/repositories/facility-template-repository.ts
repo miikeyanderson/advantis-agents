@@ -105,7 +105,8 @@ export class FacilityTemplateRepository {
       }
       const updated: FacilityTemplate = {
         ...existing,
-        ...patch,
+        name: patch.name ?? existing.name,
+        jurisdiction: patch.jurisdiction ?? existing.jurisdiction,
         requiredDocTypes: patch.requiredDocTypes ? [...patch.requiredDocTypes] : existing.requiredDocTypes,
         requiredVerificationTypes: patch.requiredVerificationTypes
           ? [...patch.requiredVerificationTypes]

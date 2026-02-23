@@ -1,0 +1,19 @@
+{
+  "id": "credentialing-source-template",
+  "name": "Advantis Credentialing",
+  "slug": "credentialing",
+  "enabled": true,
+  "provider": "advantis",
+  "type": "mcp",
+  "mcp": {
+    "transport": "stdio",
+    "command": "bun",
+    "args": [
+      "run",
+      "packages/credentialing/src/stdio-entry.ts"
+    ]
+  },
+  "tagline": "Credentialing case management, verification, approvals, and packet assembly",
+  "icon": "🩺",
+  "connectionStatus": "untested"
+}

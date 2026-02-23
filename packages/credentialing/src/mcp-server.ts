@@ -12,6 +12,14 @@ import {
 } from './repositories/index.ts'
 import { createCaseTools } from './tools/case-tools.ts'
 import { createDocumentTools } from './tools/document-tools.ts'
+import {
+  createVerificationTools,
+  MockVerificationAdapter,
+  type VerificationAdapter,
+} from './tools/verification-tools.ts'
+import { createApprovalTools } from './tools/approval-tools.ts'
+import { createTemplateTools } from './tools/template-tools.ts'
+import { createPacketTools } from './tools/packet-tools.ts'
 import type {
   CredentialingRepositories,
   ToolExecutionContext,
@@ -29,6 +37,7 @@ export type CredentialingMcpServerOptions = {
   workspacePath: string
   getSessionPrincipal: () => CredentialingSessionPrincipal | null
   callLlm?: (prompt: string, input: unknown) => Promise<unknown>
+  verificationAdapters?: Record<string, VerificationAdapter>
 }
 
 function stripActorIdentity(input: unknown): unknown {
@@ -48,12 +57,16 @@ export class CredentialingMcpServer {
   readonly sdkServer: ReturnType<typeof createSdkMcpServer>
   private readonly handlers = new Map<string, ToolHandlerDef>()
   private readonly callLlm?: (prompt: string, input: unknown) => Promise<unknown>
+  private readonly verificationAdapters = new Map<string, VerificationAdapter>()
 
   constructor(options: CredentialingMcpServerOptions) {
     this.db = options.db
     this.workspacePath = options.workspacePath
     this.getSessionPrincipal = options.getSessionPrincipal
     this.callLlm = options.callLlm
+    for (const [key, adapter] of Object.entries(options.verificationAdapters ?? {})) {
+      this.verificationAdapters.set(key, adapter)
+    }
 
     this.repos = {
       clinician: new ClinicianRepository(this.db),
@@ -68,7 +81,12 @@ export class CredentialingMcpServer {
     const handlerDefs = [
       ...createCaseTools(),
       ...createDocumentTools(),
-      // Task 4b adds verification/approval/template/packet tools.
+      ...createVerificationTools({
+        getVerificationAdapter: (verificationType) => this.getVerificationAdapter(verificationType),
+      }),
+      ...createApprovalTools(),
+      ...createTemplateTools(),
+      ...createPacketTools(),
     ]
     for (const def of handlerDefs) {
       this.handlers.set(def.name, def)
@@ -104,5 +122,17 @@ export class CredentialingMcpServer {
       callLlm: this.callLlm,
     }
     return await def.execute(input, ctx)
+  }
+
+  setVerificationAdapter(verificationType: string, adapter: VerificationAdapter): void {
+    this.verificationAdapters.set(verificationType, adapter)
+  }
+
+  private getVerificationAdapter(verificationType: string): VerificationAdapter {
+    const existing = this.verificationAdapters.get(verificationType)
+    if (existing) return existing
+    const mock = new MockVerificationAdapter(verificationType)
+    this.verificationAdapters.set(verificationType, mock)
+    return mock
   }
 }
