@@ -116,13 +116,20 @@ export class Database {
   }
 
   private createConnection(dbPath: string): SqliteConnection {
+    let primaryError: unknown
     try {
       return new BetterSqlite3ConnectionAdapter(new BetterSqlite3(dbPath))
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('NODE_MODULE_VERSION')) {
-        throw error
-      }
+      primaryError = error
+    }
+
+    try {
       return new BunSqliteConnectionAdapter(new BunSqliteDatabase(dbPath))
+    } catch {
+      if (primaryError instanceof Error) {
+        throw primaryError
+      }
+      throw primaryError
     }
   }
 
