@@ -1,2 +1,6 @@
 export * from './database.ts'
+export * from './errors.ts'
+export * from './guards.ts'
+export * from './repositories/index.ts'
+export * from './state-machine.ts'
 export * from './types.ts'

@@ -40,6 +40,12 @@ function mapCaseRow(row: CaseRow): Case {
 export class CaseRepository {
   constructor(private readonly db: Database) {}
 
+  transaction<TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => TResult,
+  ): (...args: TArgs) => TResult {
+    return this.db.getConnection().transaction(fn)
+  }
+
   create(
     data: Omit<Case, 'id' | 'templateVersion' | 'requiredDocTypesSnapshot' | 'requiredVerificationTypesSnapshot' | 'createdAt' | 'updatedAt'> & {
       createdAt?: string
