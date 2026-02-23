@@ -150,6 +150,190 @@ export interface McpToolsResult {
   tools?: McpToolWithPermission[]
 }
 
+// ============================================
+// Credentialing Types (Advantis Agents)
+// ============================================
+
+export type IpcResponse<T> =
+  | { success: true; data: T }
+  | { success: false; error: { code: string; message: string } }
+
+export type CredentialingCaseState =
+  | 'offer_accepted'
+  | 'documents_requested'
+  | 'documents_collected'
+  | 'verification_in_progress'
+  | 'verification_complete'
+  | 'packet_assembled'
+  | 'submitted'
+  | 'cleared'
+  | 'closed'
+
+export type CredentialingBlockerType =
+  | 'missing_document'
+  | 'failed_verification'
+  | 'missing_approval'
+  | 'missing_case_approval'
+
+export interface CredentialingBlocker {
+  type: CredentialingBlockerType
+  description: string
+  requiredItem: string
+  verificationId?: string
+  docTypes?: string[]
+}
+
+export interface CredentialingGuardResult {
+  allowed: boolean
+  blockers: CredentialingBlocker[]
+}
+
+export interface CredentialingClinician {
+  id: string
+  name: string
+  profession: string
+  npi: string
+  primaryLicenseState: string
+  primaryLicenseNumber: string
+  email: string
+  phone: string
+  createdAt: string
+}
+
+export interface CredentialingCase {
+  id: string
+  clinicianId: string
+  facilityId: string
+  state: CredentialingCaseState
+  startDate: string | null
+  templateVersion: number
+  requiredDocTypesSnapshot: string[]
+  requiredVerificationTypesSnapshot: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CredentialingCaseListItem extends CredentialingCase {
+  clinicianName?: string
+  clinicianProfession?: string
+  facilityName?: string
+}
+
+export interface CredentialingDocument {
+  id: string
+  caseId: string
+  docType: string
+  status: 'pending' | 'received' | 'verified' | 'rejected'
+  fileRef: string | null
+  metadata: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CredentialingVerification {
+  id: string
+  caseId: string
+  verificationType: string
+  source: string
+  pass: boolean
+  evidence: {
+    sourceUrl: string
+    timestamp: string
+    responseData: Record<string, unknown>
+  }
+  createdAt: string
+}
+
+export interface CredentialingApproval {
+  id: string
+  caseId: string
+  verificationId: string | null
+  decision: 'approved' | 'rejected' | 'waiver'
+  reviewer: string
+  notes: string
+  createdAt: string
+}
+
+export interface CredentialingFacilityTemplate {
+  id: string
+  name: string
+  jurisdiction: string
+  version: number
+  requiredDocTypes: string[]
+  requiredVerificationTypes: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CredentialingCaseEvent {
+  id: string
+  caseId: string
+  eventType:
+    | 'state_transition'
+    | 'document_recorded'
+    | 'verification_completed'
+    | 'approval_recorded'
+    | 'packet_assembled'
+    | 'case_created'
+    | 'case_closed'
+  actorType: 'agent' | 'human' | 'system'
+  actorId: string
+  evidenceRef: string | null
+  payload: Record<string, unknown>
+  timestamp: string
+}
+
+export interface CredentialingTimeline {
+  case: CredentialingCase | null
+  documents: CredentialingDocument[]
+  verifications: CredentialingVerification[]
+  approvals: CredentialingApproval[]
+  events: CredentialingCaseEvent[]
+}
+
+export interface CredentialingFindingDetail {
+  verification: CredentialingVerification
+  latestApproval: CredentialingApproval | null
+}
+
+export interface CredentialingCreateCaseInput {
+  clinicianName: string
+  profession: string
+  npi: string
+  primaryLicenseState: string
+  primaryLicenseNumber: string
+  email: string
+  phone: string
+  facilityId: string
+  startDate?: string | null
+}
+
+export interface CredentialingCreateCaseResult {
+  clinician: CredentialingClinician
+  case: CredentialingCase
+}
+
+export type CredentialingApprovalDecision = 'approved' | 'rejected' | 'waiver'
+
+export type CredentialingAgentRole =
+  | 'Coordinator'
+  | 'Intake'
+  | 'DocCollector'
+  | 'Verifier'
+  | 'PacketAssembler'
+  | 'QualityReview'
+
+export interface CredentialingAgentSession {
+  caseId: string
+  agentRole: CredentialingAgentRole
+  sessionId: string
+  workspaceId: string
+  credentialingSourceSlug: string
+  toolSubset: string[]
+  promptPath: string
+  createdAt: number
+}
+
 /**
  * Search match result for session content search
  */
@@ -570,6 +754,21 @@ export const IPC_CHANNELS = {
   GET_SESSIONS: 'sessions:get',
   CREATE_SESSION: 'sessions:create',
   CREATE_SUB_SESSION: 'sessions:createSubSession',
+  // Credentialing (Advantis Agents)
+  CREDENTIALING_QUERY_CASES: 'credentialing:query-cases',
+  CREDENTIALING_CREATE_CASE: 'credentialing:create-case',
+  CREDENTIALING_GET_CASE_TIMELINE: 'credentialing:get-case-timeline',
+  CREDENTIALING_RUN_VERIFICATION: 'credentialing:run-verification',
+  CREDENTIALING_TRANSITION_STATE: 'credentialing:transition-state',
+  CREDENTIALING_CHECK_GUARDS: 'credentialing:check-guards',
+  CREDENTIALING_GET_FINDING_DETAIL: 'credentialing:get-finding-detail',
+  CREDENTIALING_RECORD_APPROVAL: 'credentialing:record-approval',
+  CREDENTIALING_QUERY_TEMPLATES: 'credentialing:query-templates',
+  CREDENTIALING_CREATE_TEMPLATE: 'credentialing:create-template',
+  CREDENTIALING_UPDATE_TEMPLATE: 'credentialing:update-template',
+  CREDENTIALING_SPAWN_AGENT: 'credentialing:spawn-agent',
+  CREDENTIALING_GET_ACTIVE_AGENT: 'credentialing:get-active-agent',
+  CREDENTIALING_LIST_CASE_AGENTS: 'credentialing:list-case-agents',
   DELETE_SESSION: 'sessions:delete',
   GET_SESSION_MESSAGES: 'sessions:getMessages',
   SEND_MESSAGE: 'sessions:sendMessage',
@@ -911,6 +1110,42 @@ export interface ElectronAPI {
   onCloseRequested(callback: () => void): () => void
   /** Show/hide macOS traffic light buttons (for fullscreen overlays) */
   setTrafficLightsVisible(visible: boolean): Promise<void>
+
+  // Credentialing (Advantis Agents)
+  credentialingQueryCases(filters?: { state?: CredentialingCaseState; facilityId?: string }): Promise<IpcResponse<CredentialingCaseListItem[]>>
+  credentialingCreateCase(input: CredentialingCreateCaseInput): Promise<IpcResponse<CredentialingCreateCaseResult>>
+  credentialingGetCaseTimeline(caseId: string): Promise<IpcResponse<CredentialingTimeline>>
+  credentialingRunVerification(caseId: string, verificationType: string): Promise<IpcResponse<{ verification: CredentialingVerification }>>
+  credentialingTransitionState(caseId: string, targetState: CredentialingCaseState): Promise<IpcResponse<{ allowed?: boolean; blockers?: CredentialingBlocker[]; case?: CredentialingCase } | CredentialingGuardResult>>
+  credentialingCheckGuards(caseId: string, targetState: CredentialingCaseState): Promise<IpcResponse<CredentialingGuardResult>>
+  credentialingGetFindingDetail(verificationId: string): Promise<IpcResponse<CredentialingFindingDetail>>
+  credentialingRecordApproval(input: {
+    caseId: string
+    verificationId: string | null
+    decision: CredentialingApprovalDecision
+    notes: string
+  }): Promise<IpcResponse<CredentialingApproval>>
+  credentialingQueryTemplates(filters?: {
+    facilityId?: string
+    jurisdiction?: string
+    name?: string
+  }): Promise<IpcResponse<CredentialingFacilityTemplate[]>>
+  credentialingCreateTemplate(input: {
+    name: string
+    jurisdiction: string
+    requiredDocTypes: string[]
+    requiredVerificationTypes: string[]
+  }): Promise<IpcResponse<CredentialingFacilityTemplate>>
+  credentialingUpdateTemplate(input: {
+    facilityId: string
+    name?: string
+    jurisdiction?: string
+    requiredDocTypes?: string[]
+    requiredVerificationTypes?: string[]
+  }): Promise<IpcResponse<CredentialingFacilityTemplate>>
+  credentialingSpawnAgent(caseId: string, agentRole: CredentialingAgentRole): Promise<IpcResponse<CredentialingAgentSession>>
+  credentialingGetActiveAgent(caseId: string): Promise<IpcResponse<CredentialingAgentSession | null>>
+  credentialingListCaseAgents(caseId: string): Promise<IpcResponse<CredentialingAgentSession[]>>
 
   // Event listeners
   onSessionEvent(callback: (event: SessionEvent) => void): () => void

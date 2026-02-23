@@ -467,6 +467,38 @@ export function registerIpcHandlers(
       message: error instanceof Error ? error.message : String(error),
     },
   })
+  const withCredentialingWorkspace = (senderId: number): void => {
+    if (!caseManager) {
+      throw new Error('CaseManager not initialized')
+    }
+    const workspaceId = windowManager.getWorkspaceForWindow(senderId)
+    if (!workspaceId) {
+      throw new Error('No workspace is associated with the calling window')
+    }
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) {
+      throw new Error(`Workspace not found: ${workspaceId}`)
+    }
+    caseManager.setDefaultWorkspaceContext(workspace.id, workspace.rootPath)
+  }
+  const invokeCredentialingTool = async (
+    senderId: number,
+    toolName: string,
+    input: unknown,
+    code: string,
+  ) => {
+    try {
+      if (!caseManager) {
+        throw new Error('CaseManager not initialized')
+      }
+      withCredentialingWorkspace(senderId)
+      const data = await caseManager.invokeCredentialingTool(toolName, input)
+      return ok(data)
+    } catch (error) {
+      ipcLog.error(`${toolName} IPC failed:`, error)
+      return fail(code, error)
+    }
+  }
 
   // Get all sessions for the calling window's workspace
   // Waits for initialization to complete so sessions are never returned empty during startup
@@ -638,6 +670,94 @@ export function registerIpcHandlers(
       return fail('CREDENTIALING_SPAWN_AGENT_FAILED', error)
     }
   })
+
+  ipcMain.handle('credentialing:query-cases', async (event, filters?: { state?: string; facilityId?: string }) =>
+    invokeCredentialingTool(event.sender.id, 'queryCases', filters ?? {}, 'CREDENTIALING_QUERY_CASES_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:create-case',
+    async (
+      event,
+      input: {
+        clinicianName: string
+        profession: string
+        npi: string
+        primaryLicenseState: string
+        primaryLicenseNumber: string
+        email: string
+        phone: string
+        facilityId: string
+        startDate?: string | null
+      },
+    ) => invokeCredentialingTool(event.sender.id, 'createCase', input, 'CREDENTIALING_CREATE_CASE_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:get-case-timeline',
+    async (event, caseId: string) =>
+      invokeCredentialingTool(event.sender.id, 'getCaseTimeline', { caseId }, 'CREDENTIALING_GET_CASE_TIMELINE_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:run-verification',
+    async (event, caseId: string, verificationType: string) =>
+      invokeCredentialingTool(event.sender.id, 'runVerification', { caseId, verificationType }, 'CREDENTIALING_RUN_VERIFICATION_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:transition-state',
+    async (event, caseId: string, targetState: string) =>
+      invokeCredentialingTool(event.sender.id, 'transitionState', { caseId, targetState }, 'CREDENTIALING_TRANSITION_STATE_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:check-guards',
+    async (event, caseId: string, targetState: string) =>
+      invokeCredentialingTool(event.sender.id, 'checkGuards', { caseId, targetState }, 'CREDENTIALING_CHECK_GUARDS_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:get-finding-detail',
+    async (event, verificationId: string) =>
+      invokeCredentialingTool(event.sender.id, 'getFindingDetail', { verificationId }, 'CREDENTIALING_GET_FINDING_DETAIL_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:record-approval',
+    async (
+      event,
+      input: { caseId: string; verificationId: string | null; decision: 'approved' | 'rejected' | 'waiver'; notes: string },
+    ) => invokeCredentialingTool(event.sender.id, 'recordApproval', input, 'CREDENTIALING_RECORD_APPROVAL_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:query-templates',
+    async (event, filters?: { facilityId?: string; jurisdiction?: string; name?: string }) =>
+      invokeCredentialingTool(event.sender.id, 'queryTemplates', filters ?? {}, 'CREDENTIALING_QUERY_TEMPLATES_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:create-template',
+    async (
+      event,
+      input: { name: string; jurisdiction: string; requiredDocTypes: string[]; requiredVerificationTypes: string[] },
+    ) => invokeCredentialingTool(event.sender.id, 'createTemplate', input, 'CREDENTIALING_CREATE_TEMPLATE_FAILED'),
+  )
+
+  ipcMain.handle(
+    'credentialing:update-template',
+    async (
+      event,
+      input: {
+        facilityId: string
+        name?: string
+        jurisdiction?: string
+        requiredDocTypes?: string[]
+        requiredVerificationTypes?: string[]
+      },
+    ) => invokeCredentialingTool(event.sender.id, 'updateTemplate', input, 'CREDENTIALING_UPDATE_TEMPLATE_FAILED'),
+  )
 
   ipcMain.handle('credentialing:get-active-agent', async (_event, caseId: string) => {
     try {

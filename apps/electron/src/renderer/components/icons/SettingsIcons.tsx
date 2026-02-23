@@ -158,6 +158,22 @@ export const PreferencesIcon = ({ className }: IconProps) => (
   </svg>
 )
 
+export const CredentialingIcon = ({ className }: IconProps) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+  >
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M7 3C5.34315 3 4 4.34315 4 6V18C4 19.6569 5.34315 21 7 21H17C18.6569 21 20 19.6569 20 18V8.91421C20 8.11856 19.6839 7.35549 19.1213 6.79289L16.2071 3.87868C15.6445 3.31607 14.8814 3 14.0858 3H7ZM8 9C8 8.44772 8.44772 8 9 8H15C15.5523 8 16 8.44772 16 9C16 9.55228 15.5523 10 15 10H9C8.44772 10 8 9.55228 8 9ZM8 13C8 12.4477 8.44772 12 9 12H15C15.5523 12 16 12.4477 16 13C16 13.5523 15.5523 14 15 14H9C8.44772 14 8 13.5523 8 13ZM10.4142 16.5858C10.8047 16.1953 11.4379 16.1953 11.8284 16.5858L12.5 17.2574L14.1716 15.5858C14.5621 15.1953 15.1953 15.1953 15.5858 15.5858C15.9763 15.9763 15.9763 16.6095 15.5858 17L13.2071 19.3787C12.8166 19.7692 12.1834 19.7692 11.7929 19.3787L10.4142 18C10.0237 17.6095 10.0237 16.9763 10.4142 16.5858Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
 /**
  * Map of settings subpage IDs to their icon components.
  * Used by both AppMenu and SettingsNavigator for consistent icons.
@@ -170,6 +186,7 @@ export const SETTINGS_ICONS: Record<SettingsSubpage, React.ComponentType<IconPro
   workspace: WorkspaceIcon,
   permissions: PermissionsIcon,
   labels: LabelsIcon,
+  credentialing: CredentialingIcon,
   shortcuts: ShortcutsIcon,
   preferences: PreferencesIcon,
 }

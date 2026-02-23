@@ -94,7 +94,17 @@ export function createCaseTools(): ToolHandlerDef[] {
       schema: queryCasesSchema,
       mutating: false,
       execute(input, ctx) {
-        return ctx.repos.case.queryCases(queryCasesSchema.parse(input))
+        const cases = ctx.repos.case.queryCases(queryCasesSchema.parse(input))
+        return cases.map((caseRecord) => {
+          const clinician = ctx.repos.clinician.getById(caseRecord.clinicianId)
+          const facility = ctx.repos.facilityTemplate.getById(caseRecord.facilityId)
+          return {
+            ...caseRecord,
+            clinicianName: clinician?.name,
+            clinicianProfession: clinician?.profession,
+            facilityName: facility?.name,
+          }
+        })
       },
     },
     {

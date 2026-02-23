@@ -6,6 +6,7 @@ import type { CreateSessionOptions, Session } from '../shared/types'
 import {
   CaseRepository,
   ClinicianRepository,
+  CredentialingMcpServer,
   Database,
   FacilityTemplateRepository,
   CaseState,
@@ -142,6 +143,27 @@ export class CaseManager {
 
   listCaseAgents(caseId: string): AgentSession[] {
     return [...(this.caseAgents.get(caseId) ?? [])]
+  }
+
+  async invokeCredentialingTool(
+    toolName: string,
+    input: unknown,
+    principal?: { actorType: 'agent' | 'human' | 'system'; actorId: string; humanUserId?: string } | null,
+  ): Promise<unknown> {
+    const workspace = this.requireWorkspaceContext()
+    const effectivePrincipal =
+      principal ??
+      {
+        actorType: 'human' as const,
+        actorId: 'desktop-user',
+        humanUserId: 'desktop-user',
+      }
+    const server = new CredentialingMcpServer({
+      db: this.db,
+      workspacePath: workspace.workspaceRootPath,
+      getSessionPrincipal: () => effectivePrincipal,
+    })
+    return await server.invokeTool(toolName, input)
   }
 
   private requireWorkspaceContext(): WorkspaceContext {

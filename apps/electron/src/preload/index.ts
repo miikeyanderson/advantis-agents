@@ -49,6 +49,49 @@ const api: ElectronAPI = {
   },
   setTrafficLightsVisible: (visible: boolean) => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS, visible),
 
+  // Credentialing (Advantis Agents)
+  credentialingQueryCases: (filters?: { state?: import('../shared/types').CredentialingCaseState; facilityId?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_QUERY_CASES, filters),
+  credentialingCreateCase: (input: import('../shared/types').CredentialingCreateCaseInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_CREATE_CASE, input),
+  credentialingGetCaseTimeline: (caseId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_GET_CASE_TIMELINE, caseId),
+  credentialingRunVerification: (caseId: string, verificationType: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_RUN_VERIFICATION, caseId, verificationType),
+  credentialingTransitionState: (caseId: string, targetState: import('../shared/types').CredentialingCaseState) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_TRANSITION_STATE, caseId, targetState),
+  credentialingCheckGuards: (caseId: string, targetState: import('../shared/types').CredentialingCaseState) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_CHECK_GUARDS, caseId, targetState),
+  credentialingGetFindingDetail: (verificationId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_GET_FINDING_DETAIL, verificationId),
+  credentialingRecordApproval: (input: {
+    caseId: string
+    verificationId: string | null
+    decision: import('../shared/types').CredentialingApprovalDecision
+    notes: string
+  }) => ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_RECORD_APPROVAL, input),
+  credentialingQueryTemplates: (filters?: { facilityId?: string; jurisdiction?: string; name?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_QUERY_TEMPLATES, filters),
+  credentialingCreateTemplate: (input: {
+    name: string
+    jurisdiction: string
+    requiredDocTypes: string[]
+    requiredVerificationTypes: string[]
+  }) => ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_CREATE_TEMPLATE, input),
+  credentialingUpdateTemplate: (input: {
+    facilityId: string
+    name?: string
+    jurisdiction?: string
+    requiredDocTypes?: string[]
+    requiredVerificationTypes?: string[]
+  }) => ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_UPDATE_TEMPLATE, input),
+  credentialingSpawnAgent: (caseId: string, agentRole: import('../shared/types').CredentialingAgentRole) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_SPAWN_AGENT, caseId, agentRole),
+  credentialingGetActiveAgent: (caseId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_GET_ACTIVE_AGENT, caseId),
+  credentialingListCaseAgents: (caseId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_LIST_CASE_AGENTS, caseId),
+
   // Event listeners
   onSessionEvent: (callback: (event: SessionEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, sessionEvent: SessionEvent) => {
