@@ -169,8 +169,28 @@ Run `bun test` after any backend change.
 
 ```
 Branch:  feature/[task-name]
-Commits: conventional commits (feat:, fix:, chore:, test:)
 ```
+
+### Commit Convention
+
+Enforced by commitlint + husky commit-msg hook. Every commit must match:
+
+```
+type(scope): description
+```
+
+Allowed types: feat, fix, chore, docs, style, refactor, perf, test, build, ci
+
+Allowed scopes: credentialing, ui, electron, shared, core, deps
+
+```
+feat(credentialing): add state machine guards     # good
+fix(ui): resolve timeline scroll overflow          # good
+chore: rebrand to Advantis Agents                  # ok (scope warning)
+added new feature                                  # rejected
+```
+
+Config: `commitlint.config.js` + `.husky/commit-msg`
 
 No AI attribution in commits. No doc comments on internal types.
 
