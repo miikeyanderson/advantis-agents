@@ -299,6 +299,11 @@ app.whenReady().then(async () => {
     try {
       credentialingDb = new CredentialingDatabase(join(app.getPath('userData'), 'credentialing.sqlite'))
       caseManager = new CaseManager(sessionManager, credentialingDb)
+      try {
+        caseManager.seedDemoData()
+      } catch (seedErr) {
+        mainLog.warn('Credentialing seed data failed (non-fatal):', seedErr)
+      }
     } catch (err) {
       mainLog.warn('Credentialing DB failed to initialize (non-fatal):', err)
     }
@@ -323,7 +328,7 @@ app.whenReady().then(async () => {
     }
 
     // Register IPC handlers (must happen before window creation)
-    registerIpcHandlers(sessionManager, windowManager, caseManager)
+    registerIpcHandlers(sessionManager, windowManager, caseManager ?? undefined)
 
     // Create initial windows (restores from saved state or opens first workspace)
     await createInitialWindows()

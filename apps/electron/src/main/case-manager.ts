@@ -5,14 +5,19 @@ import { randomUUID } from 'node:crypto'
 import type { CreateSessionOptions, Session } from '../shared/types'
 import {
   CaseRepository,
+  CaseEventRepository,
   ClinicianRepository,
   CredentialingMcpServer,
   Database,
+  DocumentRepository,
   FacilityTemplateRepository,
+  ApprovalRepository,
+  VerificationRepository,
   CaseState,
   type Case,
   type Clinician,
 } from '../../../../packages/credentialing/src/index.ts'
+import { SEED_CLINICIANS, SEED_CASES } from '../../../../packages/credentialing/src/test-fixtures.ts'
 import {
   getAgentConfig,
   type AgentRole,
@@ -54,6 +59,10 @@ export class CaseManager {
   private readonly clinicians: ClinicianRepository
   private readonly cases: CaseRepository
   private readonly templates: FacilityTemplateRepository
+  private readonly caseEvents: CaseEventRepository
+  private readonly documents: DocumentRepository
+  private readonly verifications: VerificationRepository
+  private readonly approvals: ApprovalRepository
   private readonly caseAgents = new Map<string, AgentSession[]>()
   private defaultWorkspaceId?: string
   private defaultWorkspaceRootPath?: string
@@ -67,6 +76,10 @@ export class CaseManager {
     this.clinicians = new ClinicianRepository(db)
     this.cases = new CaseRepository(db)
     this.templates = new FacilityTemplateRepository(db)
+    this.caseEvents = new CaseEventRepository(db)
+    this.documents = new DocumentRepository(db)
+    this.verifications = new VerificationRepository(db)
+    this.approvals = new ApprovalRepository(db)
     this.defaultWorkspaceId = options?.defaultWorkspaceId
     this.defaultWorkspaceRootPath = options?.defaultWorkspaceRootPath
     this.credentialingDbPath = options?.credentialingDbPath ?? join(process.cwd(), 'credentialing.sqlite')
@@ -75,6 +88,38 @@ export class CaseManager {
   setDefaultWorkspaceContext(workspaceId: string, workspaceRootPath: string): void {
     this.defaultWorkspaceId = workspaceId
     this.defaultWorkspaceRootPath = workspaceRootPath
+  }
+
+  queryCases(filters: { state?: CaseState; facilityId?: string } = {}): Case[] {
+    return this.cases.queryCases(filters)
+  }
+
+  getCaseById(caseId: string): Case | null {
+    return this.cases.getById(caseId)
+  }
+
+  getClinicianById(clinicianId: string): Clinician | null {
+    return this.clinicians.getById(clinicianId)
+  }
+
+  getFacilityTemplateById(facilityId: string) {
+    return this.templates.getById(facilityId)
+  }
+
+  getDocumentsByCaseId(caseId: string) {
+    return this.documents.getByCaseId(caseId)
+  }
+
+  getVerificationsByCaseId(caseId: string) {
+    return this.verifications.getByCaseId(caseId)
+  }
+
+  getApprovalsByCaseId(caseId: string) {
+    return this.approvals.getByCaseId(caseId)
+  }
+
+  getCaseTimeline(caseId: string) {
+    return this.caseEvents.getTimeline(caseId)
   }
 
   createCase(
@@ -88,6 +133,93 @@ export class CaseManager {
       state: CaseState.offer_accepted,
       startDate: null,
     })
+  }
+
+  seedDemoData(): void {
+    const existingClinicians = this.clinicians.list()
+    const seedNames = new Set(SEED_CLINICIANS.map(c => c.name))
+    const alreadySeeded = existingClinicians.some(c => seedNames.has(c.name))
+    if (alreadySeeded) {
+      return
+    }
+
+    const now = new Date()
+    const createdClinicians = SEED_CLINICIANS.map(c => this.clinicians.create(c))
+
+    for (let i = 0; i < SEED_CASES.length; i++) {
+      const seedCase = SEED_CASES[i]!
+      const clinician = createdClinicians[seedCase.clinicianIndex]!
+
+      let facilityTemplate = this.templates.list({ name: seedCase.facilityName })[0]
+      if (!facilityTemplate) {
+        facilityTemplate = this.templates.create({
+          name: seedCase.facilityName,
+          jurisdiction: seedCase.facilityJurisdiction,
+          requiredDocTypes: seedCase.requiredDocTypes,
+          requiredVerificationTypes: seedCase.requiredVerificationTypes,
+        })
+      }
+
+      let startDate: string | null = null
+      if (seedCase.startDateOffsetDays !== null) {
+        const d = new Date(now)
+        d.setDate(d.getDate() + seedCase.startDateOffsetDays)
+        startDate = d.toISOString().slice(0, 10)
+      }
+
+      const createdCase = this.cases.create({
+        clinicianId: clinician.id,
+        facilityId: facilityTemplate.id,
+        state: seedCase.state,
+        startDate,
+      })
+
+      this.caseEvents.create({
+        caseId: createdCase.id,
+        eventType: 'case_created',
+        actorType: 'system',
+        actorId: 'seed',
+        evidenceRef: null,
+        payload: { seedIndex: i, clinicianName: clinician.name },
+      })
+
+      for (const doc of seedCase.documents) {
+        const fileRef = doc.status === 'pending'
+          ? null
+          : `credentialing/${createdCase.id}/docs/${doc.docType}.pdf`
+        this.documents.create({
+          caseId: createdCase.id,
+          docType: doc.docType,
+          status: doc.status,
+          fileRef,
+          metadata: {},
+        })
+      }
+
+      for (const v of seedCase.verifications) {
+        this.verifications.create({
+          caseId: createdCase.id,
+          verificationType: v.verificationType,
+          source: v.source,
+          pass: v.pass,
+          evidence: {
+            sourceUrl: '',
+            timestamp: now.toISOString(),
+            responseData: {},
+          },
+        })
+      }
+
+      if (seedCase.state === CaseState.submitted || seedCase.state === CaseState.cleared) {
+        this.approvals.create({
+          caseId: createdCase.id,
+          verificationId: null,
+          decision: 'approved',
+          reviewer: 'seed-reviewer',
+          notes: 'Seeded case-level approval for submitted/cleared demo state',
+        })
+      }
+    }
   }
 
   async spawnAgentForCase(caseId: string, agentRole: AgentRole): Promise<AgentSession> {

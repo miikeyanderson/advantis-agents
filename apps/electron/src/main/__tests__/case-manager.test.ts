@@ -13,6 +13,7 @@ import {
   Database,
   FacilityTemplateRepository,
 } from '../../../../../packages/credentialing/src/index.ts'
+import { SEED_CLINICIANS } from '../../../../../packages/credentialing/src/test-fixtures.ts'
 import { loadSourceConfig } from '../../../../../packages/shared/src/sources/index.ts'
 
 class FakeSessionManager {
@@ -136,5 +137,86 @@ describe('CaseManager', () => {
       first.sessionId,
       second.sessionId,
     ])
+  })
+})
+
+describe('CaseManager.seedDemoData', () => {
+  let workspaceRootPath: string
+  let db: Database
+  let caseManager: CaseManager
+
+  beforeEach(() => {
+    workspaceRootPath = mkdtempSync(join(tmpdir(), 'advantis-seed-'))
+    db = new Database(':memory:')
+    caseManager = new CaseManager(new FakeSessionManager(), db, {
+      defaultWorkspaceId: 'ws-seed',
+      defaultWorkspaceRootPath: workspaceRootPath,
+    })
+  })
+
+  afterEach(() => {
+    db.close()
+    rmSync(workspaceRootPath, { recursive: true, force: true })
+  })
+
+  it('inserts exactly 5 cases on first call', () => {
+    caseManager.seedDemoData()
+    const cases = caseManager.queryCases()
+    expect(cases).toHaveLength(5)
+  })
+
+  it('is idempotent: calling twice still produces 5 cases', () => {
+    caseManager.seedDemoData()
+    caseManager.seedDemoData()
+    const cases = caseManager.queryCases()
+    expect(cases).toHaveLength(5)
+  })
+
+  it('seed cases have valid FSM states', () => {
+    caseManager.seedDemoData()
+    const cases = caseManager.queryCases()
+    const validStates = new Set(Object.values(CaseState))
+    for (const c of cases) {
+      expect(validStates.has(c.state)).toBe(true)
+    }
+  })
+
+  it('seed case FSM states match fixture expectations', () => {
+    caseManager.seedDemoData()
+    const cases = caseManager.queryCases()
+
+    const statesByName = new Map<string, CaseState>()
+    for (const c of cases) {
+      const clinician = caseManager.getClinicianById(c.clinicianId)
+      if (clinician) {
+        statesByName.set(clinician.name, c.state)
+      }
+    }
+
+    expect(statesByName.get('Jane Doe')).toBe(CaseState.documents_requested)
+    expect(statesByName.get('John Smith')).toBe(CaseState.verification_in_progress)
+    expect(statesByName.get('Sarah Johnson')).toBe(CaseState.packet_assembled)
+    expect(statesByName.get('Mike Brown')).toBe(CaseState.submitted)
+    expect(statesByName.get('Amy Chen')).toBe(CaseState.verification_in_progress)
+  })
+
+  it('CaseEvents are written with actorType: system and actorId: seed', () => {
+    caseManager.seedDemoData()
+    const cases = caseManager.queryCases()
+    for (const c of cases) {
+      const timeline = caseManager.getCaseTimeline(c.id)
+      const seedEvents = timeline.filter(e => e.actorType === 'system' && e.actorId === 'seed')
+      expect(seedEvents.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('exports SEED_CLINICIANS with 5 entries matching expected names', () => {
+    expect(SEED_CLINICIANS).toHaveLength(5)
+    const names = SEED_CLINICIANS.map(c => c.name)
+    expect(names).toContain('Jane Doe')
+    expect(names).toContain('John Smith')
+    expect(names).toContain('Sarah Johnson')
+    expect(names).toContain('Mike Brown')
+    expect(names).toContain('Amy Chen')
   })
 })
