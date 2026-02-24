@@ -1,0 +1,4 @@
+interface:
+  display_name: "Advantis Frontend Design"
+  short_description: "Keep Advantis frontend UI visually consistent"
+  default_prompt: "Apply the Advantis frontend design constraints to build, modify, or review UI so it matches the existing 6-color design system, shadows, and component patterns."
