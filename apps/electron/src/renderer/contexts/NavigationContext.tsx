@@ -54,10 +54,10 @@ import type {
   ContentBadge,
 } from '../../shared/types'
 import {
-  isSessionsNavigation,
   isSourcesNavigation,
   isSettingsNavigation,
   isSkillsNavigation,
+  isCredentialingNavigation,
   DEFAULT_NAVIGATION_STATE,
 } from '../../shared/types'
 import { isValidSettingsSubpage, type SettingsSubpage } from '../../shared/settings-registry'
@@ -71,7 +71,7 @@ export type { Route }
 
 // Re-export navigation state types for consumers
 export type { NavigationState, SessionFilter }
-export { isSessionsNavigation, isSourcesNavigation, isSettingsNavigation, isSkillsNavigation }
+export { isSourcesNavigation, isSettingsNavigation, isSkillsNavigation, isCredentialingNavigation }
 
 interface NavigationContextValue {
   /** Navigate to a route */
@@ -308,10 +308,11 @@ export function NavigationProvider({
             { kind: 'allSessions' }
 
           setSession({ selected: session.id })
+          // Sessions navigator removed - navigate to credentialing dashboard after session creation
           setNavigationState({
-            navigator: 'sessions',
-            filter,
-            details: { type: 'session', sessionId: session.id },
+            navigator: 'credentialing',
+            filter: 'all',
+            details: null,
           })
 
           // Parse badges from params (JSON-encoded, used for EditPopover context hiding)
@@ -422,39 +423,6 @@ export function NavigationProvider({
     (newState: NavigationState): NavigationState => {
       let nextState = newState
 
-      // If an explicit session is provided but doesn't exist in the current workspace,
-      // treat it as no selection so we can auto-select a valid session (if any).
-      // Use store.get() for fresh atom value to avoid stale closure after session creation.
-      if (isSessionsNavigation(nextState) && nextState.details) {
-        const freshMetaMap = store.get(sessionMetaMapAtom)
-        const meta = freshMetaMap.get(nextState.details.sessionId)
-        if (!meta || (workspaceId && meta.workspaceId !== workspaceId)) {
-          nextState = { ...nextState, details: null }
-        }
-      }
-
-      // For chats: auto-select last session in workspace (if valid), otherwise first
-      if (isSessionsNavigation(nextState) && !nextState.details) {
-        const lastSelectedSessionId = getLastSelectedSessionId(nextState.filter)
-        const fallbackSessionId = lastSelectedSessionId ?? getFirstSessionId(nextState.filter)
-        if (fallbackSessionId) {
-          const stateWithSelection: NavigationState = {
-            ...nextState,
-            details: { type: 'session', sessionId: fallbackSessionId },
-          }
-          if (workspaceId) {
-            storage.set(storage.KEYS.lastSelectedSessionId, fallbackSessionId, workspaceId)
-          }
-          setSession({ selected: fallbackSessionId })
-          setNavigationState(stateWithSelection)
-          return stateWithSelection
-        } else {
-          setSession({ selected: null })
-          setNavigationState(nextState)
-          return nextState
-        }
-      }
-
       // For sources: auto-select first source if no details provided (respects filter)
       if (isSourcesNavigation(nextState) && !nextState.details) {
         const firstSourceSlug = getFirstSourceSlug(nextState.filter)
@@ -485,14 +453,6 @@ export function NavigationProvider({
           setNavigationState(nextState)
           return nextState
         }
-      }
-
-      // For chats with explicit session: update session selection
-      if (isSessionsNavigation(nextState) && nextState.details) {
-        if (workspaceId) {
-          storage.set(storage.KEYS.lastSelectedSessionId, nextState.details.sessionId, workspaceId)
-        }
-        setSession({ selected: nextState.details.sessionId })
       }
 
       // Apply state directly
@@ -592,17 +552,10 @@ export function NavigationProvider({
     navigateRef.current = navigate
   }, [navigate])
 
-  // Helper: Check if a route points to a valid session/source/skill
-  // For sessions, also check that the session is not hidden (hidden sessions are not directly navigable)
+  // Helper: Check if a route points to a valid source/skill
   const isRouteValid = useCallback((route: Route): boolean => {
     const navState = parseRouteToNavigationState(route)
     if (!navState) return true // Non-navigation routes are always valid
-
-    if (isSessionsNavigation(navState) && navState.details) {
-      const meta = sessionMetaMap.get(navState.details.sessionId)
-      // Session must exist and not be hidden
-      return meta != null && !meta.hidden
-    }
 
     if (isSourcesNavigation(navState) && navState.details) {
       return sources.some(s => s.config.slug === navState.details!.sourceSlug)
@@ -910,57 +863,12 @@ export function NavigationProvider({
     navigate(routes.view.sources(sourceSlug ? { sourceSlug } : undefined))
   }, [navigationState, navigate])
 
-  // Navigate to a session while preserving the current filter type
+  // Navigate to a session (always uses allSessions route - no session views in this app)
   const navigateToSession = useCallback((sessionId: string) => {
-    if (!isSessionsNavigation(navigationState)) {
-      navigate(routes.view.allSessions(sessionId))
-      return
-    }
+    navigate(routes.view.allSessions(sessionId))
+  }, [navigate])
 
-    const filter = navigationState.filter
-    switch (filter.kind) {
-      case 'allSessions':
-        navigate(routes.view.allSessions(sessionId))
-        break
-      case 'flagged':
-        navigate(routes.view.flagged(sessionId))
-        break
-      case 'archived':
-        navigate(routes.view.archived(sessionId))
-        break
-      case 'state':
-        navigate(routes.view.state(filter.stateId, sessionId))
-        break
-      case 'label':
-        navigate(routes.view.label(filter.labelId, sessionId))
-        break
-      case 'view':
-        navigate(routes.view.view(filter.viewId, sessionId))
-        break
-      default:
-        navigate(routes.view.allSessions(sessionId))
-    }
-  }, [navigationState, navigate])
-
-  // After sessions load (or workspace switch), if no session is selected,
-  // auto-select last-used session for this workspace (or fallback to first).
-  useEffect(() => {
-    if (!isReady || !workspaceId) return
-    if (!isSessionsNavigation(navigationState) || navigationState.details) return
-
-    const lastSelectedSessionId = getLastSelectedSessionId(navigationState.filter)
-    const fallbackSessionId = lastSelectedSessionId ?? getFirstSessionId(navigationState.filter)
-    if (!fallbackSessionId) return
-
-    navigateToSession(fallbackSessionId)
-  }, [
-    isReady,
-    workspaceId,
-    navigationState,
-    getLastSelectedSessionId,
-    getFirstSessionId,
-    navigateToSession,
-  ])
+  // No session auto-select needed - no session views in this app
 
   return (
     <NavigationContext.Provider
