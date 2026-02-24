@@ -296,8 +296,12 @@ app.whenReady().then(async () => {
     // Initialize session manager
     sessionManager = new SessionManager()
     sessionManager.setWindowManager(windowManager)
-    credentialingDb = new CredentialingDatabase(join(app.getPath('userData'), 'credentialing.sqlite'))
-    caseManager = new CaseManager(sessionManager, credentialingDb)
+    try {
+      credentialingDb = new CredentialingDatabase(join(app.getPath('userData'), 'credentialing.sqlite'))
+      caseManager = new CaseManager(sessionManager, credentialingDb)
+    } catch (err) {
+      mainLog.warn('Credentialing DB failed to initialize (non-fatal):', err)
+    }
 
     // Initialize notification service
     initNotificationService(windowManager)

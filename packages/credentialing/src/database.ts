@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
+import { SCHEMA_SQL } from './schema-sql.ts'
 
 type SqliteBinding = string | number | bigint | Uint8Array | null
 
@@ -125,7 +125,7 @@ export class Database {
       this.connection = this.createConnection(dbPath)
       this.connection.pragma('foreign_keys = ON')
       this.connection.pragma('journal_mode = WAL')
-      this.connection.exec(readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'))
+      this.connection.exec(SCHEMA_SQL)
       this.seedInitialTemplates()
     } catch (error) {
       throw new CredentialingDatabaseError('Failed to initialize credentialing database', error)
