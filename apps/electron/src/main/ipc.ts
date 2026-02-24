@@ -783,6 +783,63 @@ export function registerIpcHandlers(
     }
   })
 
+  // ============================================================
+  // Credentialing UI ViewModel IPC handlers
+  // ============================================================
+
+  ipcMain.handle(
+    'credentialing:get-case-list',
+    async (_event, filters?: { statusBucket?: import('../shared/types').UiStatusBucket }) => {
+    try {
+      if (!caseManager) throw new Error('CaseManager not initialized')
+      const { toCaseListViewModel, buildCaseWithRelated } = await import('./viewmodels/credentialing-viewmodels.ts')
+      const cases = caseManager.queryCases()
+      const withRelated = await Promise.all(cases.map(c => buildCaseWithRelated(c, caseManager)))
+      let vms = toCaseListViewModel(withRelated)
+      if (filters?.statusBucket) {
+        vms = vms.filter(vm => vm.derivedStatus === filters.statusBucket)
+      }
+      return vms
+    } catch (error) {
+      ipcLog.error('credentialing:get-case-list failed:', error)
+      return []
+    }
+    },
+  )
+
+  ipcMain.handle('credentialing:get-dashboard', async () => {
+    try {
+      if (!caseManager) throw new Error('CaseManager not initialized')
+      const { toDashboardViewModel, buildCaseWithRelated } = await import('./viewmodels/credentialing-viewmodels.ts')
+      const cases = caseManager.queryCases()
+      const withRelated = await Promise.all(cases.map(c => buildCaseWithRelated(c, caseManager)))
+      return toDashboardViewModel(withRelated)
+    } catch (error) {
+      ipcLog.error('credentialing:get-dashboard failed:', error)
+      return {
+        totalFiles: 0,
+        statusBreakdown: { 'at-risk': 0, 'blocked': 0, 'pending-submission': 0, 'with-facility': 0, 'active': 0, 'cleared': 0 },
+        attentionItems: [],
+        agentActivity: [],
+        upcomingStartDates: [],
+      }
+    }
+  })
+
+  ipcMain.handle('credentialing:get-case-detail', async (_event, caseId: string) => {
+    try {
+      if (!caseManager) throw new Error('CaseManager not initialized')
+      const { toCaseDetailViewModel, buildCaseWithRelated } = await import('./viewmodels/credentialing-viewmodels.ts')
+      const caseData = caseManager.getCaseById(caseId)
+      if (!caseData) return null
+      const withRelated = await buildCaseWithRelated(caseData, caseManager)
+      return toCaseDetailViewModel(withRelated, caseManager)
+    } catch (error) {
+      ipcLog.error('credentialing:get-case-detail failed:', error)
+      return null
+    }
+  })
+
   // Create a sub-session under a parent session
   ipcMain.handle(IPC_CHANNELS.CREATE_SUB_SESSION, async (_event, workspaceId: string, parentSessionId: string, options?: import('../shared/types').CreateSessionOptions) => {
     const end = perf.start('ipc.createSubSession', { workspaceId, parentSessionId })

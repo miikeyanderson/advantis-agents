@@ -334,6 +334,100 @@ export interface CredentialingAgentSession {
   createdAt: number
 }
 
+// ViewModel types for credentialing UI
+
+export type UiStatusBucket =
+  | 'at-risk'
+  | 'blocked'
+  | 'pending-submission'
+  | 'with-facility'
+  | 'active'
+  | 'cleared'
+
+export interface CaseListItemViewModel {
+  caseId: string
+  clinicianName: string
+  profession: string
+  facilityName: string
+  derivedStatus: UiStatusBucket
+  statusLabel: string
+  daysUntilStart: number
+  statusPriority: number
+  flagIcon: string | null
+}
+
+export interface AttentionItem {
+  caseId: string
+  clinicianName: string
+  reason: string
+  urgency: 'high' | 'medium' | 'low'
+}
+
+export interface AgentActivityItem {
+  caseId: string
+  clinicianName: string
+  agentRole: string
+  summary: string
+  timestamp: string
+}
+
+export interface StartDateGroup {
+  weekLabel: string
+  cases: Array<{ caseId: string; clinicianName: string; startDate: string }>
+}
+
+export interface DashboardViewModel {
+  totalFiles: number
+  statusBreakdown: Record<UiStatusBucket, number>
+  attentionItems: AttentionItem[]
+  agentActivity: AgentActivityItem[]
+  upcomingStartDates: StartDateGroup[]
+}
+
+export interface AgentStatus {
+  agentRole: string
+  sessionId: string
+  createdAt: number
+}
+
+export interface BlockerItem {
+  type: string
+  description: string
+  requiredItem: string
+}
+
+export interface QuickAction {
+  label: string
+  disabled: boolean
+}
+
+export interface DocumentChecklistItem {
+  docType: string
+  label: string
+  status: 'pending' | 'received' | 'verified' | 'rejected'
+}
+
+export interface VerificationRow {
+  verificationType: string
+  source: string
+  pass: boolean
+  lastChecked: string
+}
+
+export interface CaseDetailViewModel {
+  header: { name: string; profession: string; facility: string }
+  overview: {
+    state: CredentialingCaseState
+    derivedStatus: UiStatusBucket
+    completionByCategory: Record<string, number>
+    activeAgents: AgentStatus[]
+    blockers: BlockerItem[]
+    quickActions: QuickAction[]
+  }
+  documents: DocumentChecklistItem[]
+  verifications: VerificationRow[]
+}
+
 /**
  * Search match result for session content search
  */
@@ -769,6 +863,9 @@ export const IPC_CHANNELS = {
   CREDENTIALING_SPAWN_AGENT: 'credentialing:spawn-agent',
   CREDENTIALING_GET_ACTIVE_AGENT: 'credentialing:get-active-agent',
   CREDENTIALING_LIST_CASE_AGENTS: 'credentialing:list-case-agents',
+  CREDENTIALING_GET_DASHBOARD: 'credentialing:get-dashboard',
+  CREDENTIALING_GET_CASE_LIST: 'credentialing:get-case-list',
+  CREDENTIALING_GET_CASE_DETAIL: 'credentialing:get-case-detail',
   DELETE_SESSION: 'sessions:delete',
   GET_SESSION_MESSAGES: 'sessions:getMessages',
   SEND_MESSAGE: 'sessions:sendMessage',
@@ -1147,6 +1244,11 @@ export interface ElectronAPI {
   credentialingGetActiveAgent(caseId: string): Promise<IpcResponse<CredentialingAgentSession | null>>
   credentialingListCaseAgents(caseId: string): Promise<IpcResponse<CredentialingAgentSession[]>>
 
+  // Credentialing UI ViewModel IPC
+  credentialingGetDashboard(): Promise<DashboardViewModel>
+  credentialingGetCaseList(filters?: { statusBucket?: UiStatusBucket }): Promise<CaseListItemViewModel[]>
+  credentialingGetCaseDetail(caseId: string): Promise<CaseDetailViewModel | null>
+
   // Event listeners
   onSessionEvent(callback: (event: SessionEvent) => void): () => void
 
@@ -1516,18 +1618,6 @@ export type { SettingsSubpage } from './settings-registry'
 import { isValidSettingsSubpage, type SettingsSubpage } from './settings-registry'
 
 /**
- * Sessions navigation state - shows SessionList in navigator
- */
-export interface SessionsNavigationState {
-  navigator: 'sessions'
-  filter: SessionFilter
-  /** Selected session details, or null for empty state */
-  details: { type: 'session'; sessionId: string } | null
-  /** Optional right sidebar panel state */
-  rightSidebar?: RightSidebarPanel
-}
-
-/**
  * Source type filter for sources navigation (e.g., show only APIs, MCPs, or Local sources)
  */
 export interface SourceFilter {
@@ -1578,18 +1668,21 @@ export interface SkillsNavigationState {
  * - NavigatorPanel: which list/content to show (from navigator)
  * - MainContentPanel: what details to display (from details or subpage)
  */
+/**
+ * Credentialing navigation state - shows CredentialingListPanel in navigator
+ */
+export interface CredentialingNavigationState {
+  navigator: 'credentialing'
+  filter: UiStatusBucket | 'all'
+  details: { type: 'case'; caseId: string } | null
+  rightSidebar?: RightSidebarPanel
+}
+
 export type NavigationState =
-  | SessionsNavigationState
   | SourcesNavigationState
   | SettingsNavigationState
   | SkillsNavigationState
-
-/**
- * Type guard to check if state is sessions navigation
- */
-export const isSessionsNavigation = (
-  state: NavigationState
-): state is SessionsNavigationState => state.navigator === 'sessions'
+  | CredentialingNavigationState
 
 /**
  * Type guard to check if state is sources navigation
@@ -1613,11 +1706,18 @@ export const isSkillsNavigation = (
 ): state is SkillsNavigationState => state.navigator === 'skills'
 
 /**
- * Default navigation state - allSessions with no selection
+ * Type guard to check if state is credentialing navigation
+ */
+export const isCredentialingNavigation = (
+  state: NavigationState
+): state is CredentialingNavigationState => state.navigator === 'credentialing'
+
+/**
+ * Default navigation state - credentialing with no selection
  */
 export const DEFAULT_NAVIGATION_STATE: NavigationState = {
-  navigator: 'sessions',
-  filter: { kind: 'allSessions' },
+  navigator: 'credentialing',
+  filter: 'all',
   details: null,
 }
 
@@ -1640,17 +1740,14 @@ export const getNavigationStateKey = (state: NavigationState): string => {
   if (state.navigator === 'settings') {
     return `settings:${state.subpage}`
   }
-  // Chats
-  const f = state.filter
-  let base: string
-  if (f.kind === 'state') base = `state:${f.stateId}`
-  else if (f.kind === 'label') base = `label:${f.labelId}`
-  else if (f.kind === 'view') base = `view:${f.viewId}`
-  else base = f.kind
-  if (state.details) {
-    return `${base}/chat/${state.details.sessionId}`
+  if (state.navigator === 'credentialing') {
+    const base = `credentialing:${state.filter}`
+    if (state.details) {
+      return `${base}/case/${state.details.caseId}`
+    }
+    return base
   }
-  return base
+  return 'credentialing'
 }
 
 /**
@@ -1687,42 +1784,42 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
     }
   }
 
-  // Handle sessions - parse filter and optional session
-  const parseSessionsKey = (filterKey: string, sessionId?: string): NavigationState | null => {
-    let filter: SessionFilter
-    if (filterKey === 'allSessions') filter = { kind: 'allSessions' }
-    else if (filterKey === 'flagged') filter = { kind: 'flagged' }
-    else if (filterKey === 'archived') filter = { kind: 'archived' }
-    else if (filterKey.startsWith('state:')) {
-      const stateId = filterKey.slice(6)
-      if (!stateId) return null
-      filter = { kind: 'state', stateId }
-    } else if (filterKey.startsWith('label:')) {
-      const labelId = filterKey.slice(6)
-      if (!labelId) return null
-      filter = { kind: 'label', labelId }
-    } else if (filterKey.startsWith('view:')) {
-      const viewId = filterKey.slice(5)
-      if (!viewId) return null
-      filter = { kind: 'view', viewId }
-    } else {
+  // Handle credentialing
+  if (key === 'credentialing' || key === 'credentialing:all') {
+    return { navigator: 'credentialing', filter: 'all', details: null }
+  }
+  if (key.startsWith('credentialing:')) {
+    const raw = key.slice('credentialing:'.length)
+    const [filterPart, detailPrefix, caseId] = raw.split('/')
+    const validFilters: Array<UiStatusBucket | 'all'> = [
+      'all',
+      'at-risk',
+      'blocked',
+      'pending-submission',
+      'with-facility',
+      'active',
+      'cleared',
+    ]
+
+    if (!validFilters.includes(filterPart as UiStatusBucket | 'all')) {
       return null
     }
-    return {
-      navigator: 'sessions',
-      filter,
-      details: sessionId ? { type: 'session', sessionId } : null,
+
+    const filter = filterPart as UiStatusBucket | 'all'
+    if (!detailPrefix) {
+      return { navigator: 'credentialing', filter, details: null }
     }
+    if (detailPrefix === 'case' && caseId) {
+      return {
+        navigator: 'credentialing',
+        filter,
+        details: { type: 'case', caseId },
+      }
+    }
+    return null
   }
 
-  // Check for session details
-  if (key.includes('/session/')) {
-    const [filterPart, , sessionId] = key.split('/')
-    return parseSessionsKey(filterPart, sessionId)
-  }
-
-  // Simple filter key
-  return parseSessionsKey(key)
+  return null
 }
 
 declare global {

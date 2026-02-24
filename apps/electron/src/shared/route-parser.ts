@@ -14,6 +14,7 @@ import type {
   SessionFilter,
   SourceFilter,
   RightSidebarPanel,
+  UiStatusBucket,
 } from './types'
 import { isValidSettingsSubpage, type SettingsSubpage } from './settings-registry'
 
@@ -34,7 +35,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'settings'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'settings' | 'credentialing'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -43,6 +44,8 @@ export interface ParsedCompoundRoute {
   sessionFilter?: SessionFilter
   /** Source filter (only for sources navigator) */
   sourceFilter?: SourceFilter
+  /** Credentialing filter (only for credentialing navigator) */
+  credentialingFilter?: UiStatusBucket | 'all'
   /** Details page info (null for empty state) */
   details: {
     type: string
@@ -58,7 +61,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'settings'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'settings', 'credentialing'
 ]
 
 /**
@@ -154,6 +157,41 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
     return null
   }
 
+  // Credentialing navigator
+  if (first === 'credentialing') {
+    if (segments.length === 1) {
+      return { navigator: 'credentialing', details: null }
+    }
+
+    // credentialing/case/{caseId} (no filter prefix)
+    if (segments[1] === 'case' && segments[2]) {
+      return {
+        navigator: 'credentialing',
+        credentialingFilter: 'all',
+        details: { type: 'case', id: segments[2] },
+      }
+    }
+
+    // credentialing/{filter}[/case/{caseId}]
+    const validFilters: Array<UiStatusBucket | 'all'> = ['all', 'at-risk', 'blocked', 'pending-submission', 'with-facility', 'active', 'cleared']
+    if (validFilters.includes(segments[1] as UiStatusBucket | 'all')) {
+      const credentialingFilter = segments[1] as UiStatusBucket | 'all'
+      // credentialing/{filter}/case/{caseId}
+      if (segments[2] === 'case' && segments[3]) {
+        return {
+          navigator: 'credentialing',
+          credentialingFilter,
+          details: { type: 'case', id: segments[3] },
+        }
+      }
+
+      if (segments.length > 2) return null
+      return { navigator: 'credentialing', credentialingFilter, details: null }
+    }
+
+    return null
+  }
+
   // Sessions navigator (allSessions, flagged, state)
   let sessionFilter: SessionFilter
   let detailsStartIndex: number
@@ -234,6 +272,14 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
   if (parsed.navigator === 'skills') {
     if (!parsed.details) return 'skills'
     return `skills/skill/${parsed.details.id}`
+  }
+
+  if (parsed.navigator === 'credentialing') {
+    const base = parsed.credentialingFilter && parsed.credentialingFilter !== 'all'
+      ? `credentialing/${parsed.credentialingFilter}`
+      : 'credentialing'
+    if (!parsed.details) return base
+    return `${base}/case/${parsed.details.id}`
   }
 
   // Sessions navigator
@@ -349,6 +395,27 @@ function convertCompoundToViewRoute(compound: ParsedCompoundRoute): ParsedRoute 
       return { type: 'view', name: 'skills', params: {} }
     }
     return { type: 'view', name: 'skill-info', id: compound.details.id, params: {} }
+  }
+
+  // Credentialing
+  if (compound.navigator === 'credentialing') {
+    if (!compound.details) {
+      return {
+        type: 'view',
+        name: 'credentialing',
+        params: compound.credentialingFilter && compound.credentialingFilter !== 'all'
+          ? { filter: compound.credentialingFilter }
+          : {},
+      }
+    }
+    return {
+      type: 'view',
+      name: 'case-detail',
+      id: compound.details.id,
+      params: compound.credentialingFilter && compound.credentialingFilter !== 'all'
+        ? { filter: compound.credentialingFilter }
+        : {},
+    }
   }
 
   // Sessions
@@ -468,18 +535,23 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     }
   }
 
-  // Sessions
-  const filter = compound.sessionFilter || { kind: 'allSessions' as const }
-  if (compound.details) {
+  // Credentialing
+  if (compound.navigator === 'credentialing') {
+    const filter = compound.credentialingFilter ?? 'all'
+    if (!compound.details) {
+      return { navigator: 'credentialing', filter, details: null }
+    }
     return {
-      navigator: 'sessions',
+      navigator: 'credentialing',
       filter,
-      details: { type: 'session', sessionId: compound.details.id },
+      details: { type: 'case', caseId: compound.details.id },
     }
   }
+
+  // Sessions navigator removed - fall back to credentialing
   return {
-    navigator: 'sessions',
-    filter,
+    navigator: 'credentialing',
+    filter: 'all',
     details: null,
   }
 }
@@ -532,72 +604,15 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
         }
       }
       return { navigator: 'skills', details: null }
+    // Sessions navigator removed - these routes fall back to credentialing
     case 'session':
-      if (parsed.id) {
-        // Reconstruct filter from params
-        const filterKind = (parsed.params.filter || 'allSessions') as SessionFilter['kind']
-        let filter: SessionFilter
-        if (filterKind === 'state' && parsed.params.stateId) {
-          filter = { kind: 'state', stateId: parsed.params.stateId }
-        } else if (filterKind === 'label' && parsed.params.labelId) {
-          filter = { kind: 'label', labelId: parsed.params.labelId }
-        } else if (filterKind === 'view' && parsed.params.viewId) {
-          filter = { kind: 'view', viewId: parsed.params.viewId }
-        } else {
-          filter = { kind: filterKind as 'allSessions' | 'flagged' | 'archived' }
-        }
-        return {
-          navigator: 'sessions',
-          filter,
-          details: { type: 'session', sessionId: parsed.id },
-        }
-      }
-      return { navigator: 'sessions', filter: { kind: 'allSessions' }, details: null }
     case 'allSessions':
-      return {
-        navigator: 'sessions',
-        filter: { kind: 'allSessions' },
-        details: null,
-      }
     case 'flagged':
-      return {
-        navigator: 'sessions',
-        filter: { kind: 'flagged' },
-        details: null,
-      }
     case 'archived':
-      return {
-        navigator: 'sessions',
-        filter: { kind: 'archived' },
-        details: null,
-      }
     case 'state':
-      if (parsed.id) {
-        return {
-          navigator: 'sessions',
-          filter: { kind: 'state', stateId: parsed.id },
-          details: null,
-        }
-      }
-      return { navigator: 'sessions', filter: { kind: 'allSessions' }, details: null }
     case 'label':
-      if (parsed.id) {
-        return {
-          navigator: 'sessions',
-          filter: { kind: 'label', labelId: parsed.id },
-          details: null,
-        }
-      }
-      return { navigator: 'sessions', filter: { kind: 'allSessions' }, details: null }
     case 'view':
-      if (parsed.id) {
-        return {
-          navigator: 'sessions',
-          filter: { kind: 'view', viewId: parsed.id },
-          details: null,
-        }
-      }
-      return { navigator: 'sessions', filter: { kind: 'allSessions' }, details: null }
+      return { navigator: 'credentialing', filter: 'all', details: null }
     default:
       return null
   }
@@ -630,34 +645,16 @@ export function buildRouteFromNavigationState(state: NavigationState): string {
     return 'skills'
   }
 
-  // Sessions
-  const filter = state.filter
-  let base: string
-  switch (filter.kind) {
-    case 'allSessions':
-      base = 'allSessions'
-      break
-    case 'flagged':
-      base = 'flagged'
-      break
-    case 'archived':
-      base = 'archived'
-      break
-    case 'state':
-      base = `state/${filter.stateId}`
-      break
-    case 'label':
-      base = `label/${encodeURIComponent(filter.labelId)}`
-      break
-    case 'view':
-      base = `view/${encodeURIComponent(filter.viewId)}`
-      break
+  if (state.navigator === 'credentialing') {
+    const base = state.filter && state.filter !== 'all' ? `credentialing/${state.filter}` : 'credentialing'
+    if (state.details?.type === 'case') {
+      return `${base}/case/${state.details.caseId}`
+    }
+    return base
   }
 
-  if (state.details) {
-    return `${base}/session/${state.details.sessionId}`
-  }
-  return base
+  // Sessions navigator removed - default to credentialing
+  return 'credentialing'
 }
 
 // =============================================================================

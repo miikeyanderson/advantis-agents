@@ -92,6 +92,14 @@ const api: ElectronAPI = {
   credentialingListCaseAgents: (caseId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_LIST_CASE_AGENTS, caseId),
 
+  // Credentialing UI ViewModel methods
+  credentialingGetDashboard: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_GET_DASHBOARD),
+  credentialingGetCaseList: (filters?: { statusBucket?: import('../shared/types').UiStatusBucket }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_GET_CASE_LIST, filters),
+  credentialingGetCaseDetail: (caseId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREDENTIALING_GET_CASE_DETAIL, caseId),
+
   // Event listeners
   onSessionEvent: (callback: (event: SessionEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, sessionEvent: SessionEvent) => {

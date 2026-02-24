@@ -16,6 +16,7 @@
  */
 
 import type { SettingsSubpage } from './settings-registry'
+import type { UiStatusBucket } from './types'
 
 // Helper to build query strings from params
 function toQueryString(params?: Record<string, string | undefined>): string {
@@ -161,6 +162,16 @@ export const routes = {
       subpage
         ? `settings/${subpage}` as const
         : 'settings' as const,
+
+    /** Credentialing view (credentialing navigator) */
+    credentialing: (filter?: UiStatusBucket | 'all', caseId?: string) => {
+      if (!filter || filter === 'all') {
+        if (caseId) return `credentialing/case/${caseId}` as const
+        return 'credentialing' as const
+      }
+      if (caseId) return `credentialing/${filter}/case/${caseId}` as const
+      return `credentialing/${filter}` as const
+    },
   },
 } as const
 
